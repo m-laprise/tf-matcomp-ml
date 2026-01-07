@@ -14,8 +14,8 @@ data:
   r: 2
   p_mask: 0.3
   n_train: 256
-  n_test: 256
   n_test: 64
+  num_tokens: 405
   fixed_len: True
 
 train:

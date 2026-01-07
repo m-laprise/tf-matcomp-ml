@@ -5,7 +5,6 @@ import yaml
 import torch
 import torch.nn.functional as F
 
-
 from model import TransformerModel
 from data import *
 from utils import print_output
@@ -15,7 +14,6 @@ torch.set_grad_enabled(False)
 device = "cuda" if torch.cuda.is_available() else "cpu"
 print(f"DEVICE: {device}")
 
-
 def main(args):
     m, n, r = args.data.m, args.data.n, args.data.rank
     L, H = args.model.num_hidden_layers, args.model.num_attention_heads
@@ -24,7 +22,8 @@ def main(args):
         data_sampler = RealMatrix(args.data, device=device)
 
     elif args.data.type == "integer":
-        data_sampler = IntegerMatrix(args.data, device=device)
+        #data_sampler = IntegerMatrix(args.data, device=device)
+        raise ValueError("IntegerMatrix not implemented")
 
     elif args.data.type == "gaussian":
         data_sampler = GaussianMatrix(args.data, device=device) 

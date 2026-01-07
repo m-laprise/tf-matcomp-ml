@@ -32,7 +32,7 @@ def train_epoch(
     # Data ------------------------------------------------------------------
     m, n, r_t, r_e = args.data.m, args.data.n, args.data.train_rank, args.data.test_rank
 
-    X_mask_tr, X_tr, mask_tr = data_sampler.fast_sample(
+    X_mask_tr, X_tr, mask_tr = data_sampler.sample(
         n_samples=args.train.num_train, m=m, n=n, r=r_t, p_mask=args.data.train_p_mask
     )
     X_mask_tr.requires_grad_(False)
@@ -89,7 +89,7 @@ def train_epoch(
             .item()
         )
 
-        X_mask_ev, X_ev, mask_ev = data_sampler.fast_sample(
+        X_mask_ev, X_ev, mask_ev = data_sampler.sample(
             n_samples=args.train.num_eval, m=m, n=n, r=r_e, p_mask=args.data.test_p_mask
         )
         X_mask_ev.requires_grad_(False)
@@ -181,7 +181,7 @@ def main(args, ckpt_dir):
         optim.load_state_dict(ckpt["optim"])
         start = ckpt["epoch"] + 1
         vocab_size = ckpt["vocab_size"]
-        print(f"loading model state at epoch {start - 1} with loss {ckpt['loss']}")
+        print(f"loading model state at epoch {start - 1} with loss {ckpt['train_loss']}")
 
     if args.wandb.log:
         wandb_run_name = ckpt_dir
@@ -209,7 +209,7 @@ def main(args, ckpt_dir):
         )
         best_loss = min(eval_loss, best_loss)
 
-    if args.wandb_log:
+    if args.wandb.log:
         wandb.finish()
 
 

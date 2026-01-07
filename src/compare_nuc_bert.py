@@ -10,10 +10,9 @@ import numpy as np
 from torch.optim import Adam
 import torch.nn.functional as F
 
-
 from model import TransformerModel
 from data import RealMatrix
-from cvx_nuc import nuc_norm_solver
+from cvx_nuc_norm import nuc_norm_solver
 
 torch.set_printoptions(precision=4)
 device = "cuda" if torch.cuda.is_available() else "cpu"
