@@ -30,6 +30,7 @@ def print_output(
     mask_loss=None,
     obs_loss=None,
     mean_mask_value=None,
+    max_entries=None
 ):
     out = []
     if (
@@ -45,11 +46,32 @@ def print_output(
             f"({m}, {n}, {r}) Step {epoch} -- train loss: {round(train_loss, 4)}, eval loss: {round(eval_loss, 4)}"
         )
 
-    for i in range(X.shape[0]):
-        out = []
-        for j in range(X.shape[1]):
-            out.append(
-                f"({round(float(output.view(X.shape)[i,j]), 4)}, {round(X[i,j].item(), 4)}, {int(mask.view(X.shape)[i,j] != 0)})"
+    if max_entries is None:
+        for i in range(X.shape[0]):
+            out = []
+            for j in range(X.shape[1]):
+                out.append(
+                    f"({round(float(output.view(X.shape)[i,j]), 4)}, {round(X[i,j].item(), 2)}, {int(mask.view(X.shape)[i,j] != 0)})"
+                )
+            print(f"{' '.join(out)}")
+    else:
+        rows, cols = X.shape[0], X.shape[1]
+        flat_count = rows * cols
+        sample_count = min(max_entries, flat_count) # type: ignore
+        entries = []
+        mask_view = mask.view(X.shape)
+        for idx in range(sample_count):
+            i, j = divmod(idx, cols)
+            entries.append(
+                f"({i},{j}) pred={round(float(output.view(X.shape)[i,j]), 4)} "
+                f"target={round(X[i,j].item(), 2)} obs={int(mask_view[i,j] != 0)}"
             )
-        print(f"{' '.join(out)}")
+        print("sample: " + " | ".join(entries))
+    #for i in range(X.shape[0]):
+     #   out = []
+     #   for j in range(X.shape[1]):
+     #       out.append(
+     #           f"({round(float(output.view(X.shape)[i,j]), 4)}, {round(X[i,j].item(), 4)}, {int(mask.view(X.shape)[i,j] != 0)})"
+     #       )
+     #   print(f"{' '.join(out)}")
     print("------------")

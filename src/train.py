@@ -2,7 +2,8 @@ import argparse
 import yaml
 from dotmap import DotMap
 import wandb
-
+import math
+import os
 
 import torch
 from torch.optim import Adam
@@ -18,7 +19,6 @@ torch.set_printoptions(precision=4)
 device = "cuda" if torch.cuda.is_available() else "cpu"
 print(f"DEVICE: {device}")
 
-
 def train_epoch(
     model,
     loss_fn,
@@ -27,6 +27,7 @@ def train_epoch(
     data_sampler,
     ckpt_dir,
     best_loss,
+    last_epoch,
     args,
 ):
     # Data ------------------------------------------------------------------
@@ -52,109 +53,124 @@ def train_epoch(
     loss = loss_fn(output, X_tr)
 
     loss.backward()
+    torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
     optimizer.step()
 
     # Eval & Logging ---------------------------------------------------------
-    with torch.no_grad():
-        model.eval()
+    train_loss = loss.detach().item()
+    eval_loss = train_loss
+    do_eval = epoch == 0 or epoch == last_epoch or (epoch + 1) % 25 == 0
+    
+    if args.wandb.log:
+      wandb.log(
+          {
+              "epoch": epoch,
+              "train": train_loss,
+          }
+      )
+    
+    if do_eval:
+        with torch.no_grad():
+            model.eval()
 
-        train_output = model(X_mask_tr, attention_mask=att_mask_tr).view(X_tr.shape)
-        train_loss = (
-            F.mse_loss(input=train_output, target=X_tr, reduction="mean")
-            .detach()
-            .item()
-        )
-
-        mask_loss = (
-            F.mse_loss(
-                input=train_output[mask_tr.view(train_output.shape) == 0],
-                target=X_tr[mask_tr.view(train_output.shape) == 0],
-                reduction="mean",
-            )
-            .detach()
-            .item()
-        )
-        obs_loss = (
-            F.mse_loss(
-                input=train_output[mask_tr.view(train_output.shape) == 1],
-                target=X_tr[mask_tr.view(train_output.shape) == 1],
-                reduction="mean",
-            )
-            .detach()
-            .item()
-        )
-        mean_mask_value = (
-            torch.mean(torch.abs(train_output[mask_tr.view(train_output.shape) == 0]))
-            .detach()
-            .item()
-        )
-
-        X_mask_ev, X_ev, mask_ev = data_sampler.sample(
-            n_samples=args.train.num_eval, m=m, n=n, r=r_e, p_mask=args.data.test_p_mask
-        )
-        X_mask_ev.requires_grad_(False)
-        X_ev.requires_grad_(False)
-        mask_ev.requires_grad_(False)
-
-        att_mask_ev = torch.ones_like(X_mask_ev).to(device)
-        att_mask_ev.requires_grad_(False)
-
-        eval_output = model(X_mask_ev, attention_mask=att_mask_ev).view(X_ev.shape)
-        eval_loss = (
-            F.mse_loss(input=eval_output, target=X_ev, reduction="mean").detach().item()
-        )
-
-        idx = torch.randint(low=0, high=X_ev.shape[0], size=(1,)).item()
-        print_output(
-            epoch=epoch,
-            train_loss=train_loss,
-            eval_loss=eval_loss,
-            m=m,
-            n=n,
-            r=r_t,
-            output=eval_output[idx],
-            X=X_ev[idx],
-            mask=mask_ev[idx],
-            mask_loss=mask_loss,
-            obs_loss=obs_loss,
-            mean_mask_value=mean_mask_value,
-        )
-        del train_output, eval_output
-
-        if args.wandb.log:
-            wandb.log(
-                {
-                    "train": train_loss,
-                    "eval": eval_loss,
-                    "mask loss": mask_loss,
-                    "obs loss": obs_loss,
-                    "mask value": mean_mask_value,
-                }
+            train_output = model(X_mask_tr, attention_mask=att_mask_tr).view(X_tr.shape)
+            train_loss = (
+                F.mse_loss(input=train_output, target=X_tr, reduction="mean")
+                .detach()
+                .item()
             )
 
-        if args.train.save_ckpt:
-            if (epoch + 1) % args.train.save_freq == 0:
-                model.train()
-                torch.save(
+            mask_loss = (
+                F.mse_loss(
+                    input=train_output[mask_tr.view(train_output.shape) == 0],
+                    target=X_tr[mask_tr.view(train_output.shape) == 0],
+                    reduction="mean",
+                )
+                .detach()
+                .item()
+            )
+            obs_loss = (
+                F.mse_loss(
+                    input=train_output[mask_tr.view(train_output.shape) == 1],
+                    target=X_tr[mask_tr.view(train_output.shape) == 1],
+                    reduction="mean",
+                )
+                .detach()
+                .item()
+            )
+            mean_mask_value = (
+                torch.mean(torch.abs(train_output[mask_tr.view(train_output.shape) == 0]))
+                .detach()
+                .item()
+            )
+
+            X_mask_ev, X_ev, mask_ev = data_sampler.sample(
+                n_samples=args.train.num_eval, m=m, n=n, r=r_e, p_mask=args.data.test_p_mask
+            )
+            X_mask_ev.requires_grad_(False)
+            X_ev.requires_grad_(False)
+            mask_ev.requires_grad_(False)
+
+            att_mask_ev = torch.ones_like(X_mask_ev).to(device)
+            att_mask_ev.requires_grad_(False)
+
+            eval_output = model(X_mask_ev, attention_mask=att_mask_ev).view(X_ev.shape)
+            eval_loss = (
+                F.mse_loss(input=eval_output, target=X_ev, reduction="mean").detach().item()
+            )
+
+            idx = torch.randint(low=0, high=X_ev.shape[0], size=(1,)).item()
+            print_output(
+                epoch=epoch,
+                train_loss=train_loss,
+                eval_loss=eval_loss,
+                m=m,
+                n=n,
+                r=r_t,
+                output=eval_output[idx],
+                X=X_ev[idx],
+                mask=mask_ev[idx],
+                mask_loss=mask_loss,
+                obs_loss=obs_loss,
+                mean_mask_value=mean_mask_value,
+                max_entries=3,
+            )
+            del train_output, eval_output
+
+            if args.wandb.log:
+                wandb.log(
                     {
                         "epoch": epoch,
-                        "model": model.state_dict(),
-                        "optim": optimizer.state_dict(),
-                        "train_loss": train_loss,
-                        "eval_loss": eval_loss,
-                        "vocab_size": len(data_sampler.vocab.keys()),
-                    },
-                    f"./{ckpt_dir}.tar",
+                        "eval": eval_loss,
+                        "mask loss": mask_loss,
+                        "obs loss": obs_loss,
+                        "mask value": mean_mask_value,
+                    }
                 )
-                print(f"saved state at epoch {epoch} to {f'./{ckpt_dir}.tar'}")
 
-                if args.wandb.log:
-                    model_wandb = wandb.Artifact(
-                        f"model_{ckpt_dir}_step{epoch}", type="model"
+            if args.train.save_ckpt:
+                if (epoch + 1) % args.train.save_freq == 0:
+                    model.train()
+                    torch.save(
+                        {
+                            "epoch": epoch,
+                            "model": model.state_dict(),
+                            "optim": optimizer.state_dict(),
+                            "train_loss": train_loss,
+                            "eval_loss": eval_loss,
+                            "vocab_size": len(data_sampler.vocab.keys()),
+                        },
+                        f"./{ckpt_dir}.tar",
                     )
-                    model_wandb.add_file(f"./{ckpt_dir}.tar")
-                    wandb.log_artifact(model_wandb)
-                    print("model uploaded to wandb")
+                    print(f"saved state at epoch {epoch} to {f'./{ckpt_dir}.tar'}")
+
+                    if args.wandb.log:
+                        model_wandb = wandb.Artifact(
+                            f"model_{ckpt_dir}_step{epoch}", type="model"
+                        )
+                        model_wandb.add_file(f"./{ckpt_dir}.tar")
+                        wandb.log_artifact(model_wandb)
+                        print("model uploaded to wandb")
 
     return eval_loss
 
@@ -172,6 +188,18 @@ def main(args, ckpt_dir):
     mse_loss = MSELoss(reduction="mean")
 
     optim = Adam(model.parameters(), lr=args.train.lr)
+    
+    # Add learning rate schedule
+    steps = args.train.epochs  # 1 optimizer step per epoch
+    scheduler = torch.optim.lr_scheduler.OneCycleLR(
+        optim,
+        max_lr=args.train.lr,
+        total_steps=steps,
+        pct_start=0.1,
+        anneal_strategy="cos",
+        div_factor=10.0,
+        final_div_factor=100.0,
+    )
 
     start = 0
     if args.train.restore_ckpt:
@@ -187,6 +215,8 @@ def main(args, ckpt_dir):
         wandb_run_name = ckpt_dir
         wandb.login(key="")
         wandb.init(project="tf-matcomp", name=wandb_run_name, config=args)
+        wandb.define_metric("epoch")
+        wandb.define_metric("*", step_metric="epoch")
         wandb.watch(model)
 
     # Print model config and param names if required ----
@@ -196,6 +226,7 @@ def main(args, ckpt_dir):
     #         print(name, param.shape)
 
     best_loss = 1000.0
+    last_epoch = start + args.train.epochs - 1
     for epoch in range(start, start + args.train.epochs):
         eval_loss = train_epoch(
             model=model,
@@ -205,8 +236,10 @@ def main(args, ckpt_dir):
             data_sampler=data_sampler,
             ckpt_dir=ckpt_dir,
             best_loss=best_loss,
+            last_epoch=last_epoch,
             args=args,
         )
+        scheduler.step()
         best_loss = min(eval_loss, best_loss)
 
     if args.wandb.log:
@@ -222,7 +255,7 @@ if __name__ == "__main__":
     with open(args.config, "r") as f:
         config = DotMap(yaml.safe_load(f))
 
-    ckpt_dir = str(args.config).split(".")[0].split("/")[1]
+    ckpt_dir = os.path.splitext(os.path.basename(args.config))[0]
     print(config)
     print(ckpt_dir)
     main(config, ckpt_dir)
