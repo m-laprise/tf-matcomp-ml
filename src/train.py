@@ -2,7 +2,6 @@ import argparse
 import yaml
 from dotmap import DotMap
 import wandb
-import math
 import os
 
 import torch
